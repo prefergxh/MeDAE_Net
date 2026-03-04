@@ -70,15 +70,46 @@ class RSBU_CS(nn.Module):
 
 class Encoder(nn.Module):
     def __init__(self):
-        super().__init__()
-
+        super(Encoder,self).__init__()
+        self.conv1 = nn.Sequential(
+            nn.Conv1d(in_channels=1,out_channels=64,kernel_size=3,stride=1,padding=1,bias=False),
+            nn.BatchNorm1d(64),
+            nn.ReLU(inplace=True)
+        )
+        self.stage1 = self._make_layer(RSBU_CS,64,16,blocks=2,stride=1)
+        self.stage2 = self._make_layer(RSBU_CS,16,32,blocks=2,stride=1)
+        self.stage3 = self._make_layer(RSBU_CS,32,64,blocks=2,stride=2)
+        self.stage4 = self._make_layer(RSBU_CS,64,128,blocks=2,stride=2)
+        self.stage5 = self._make_layer(RSBU_CS,128,256,blocks=2,stride=2)
+        self.stage6 = self._make_layer(RSBU_CS,256,512,blocks=2,stride=2)
+        self.stage7 = self._make_layer(RSBU_CS,512,1024,blocks=2,stride=2)
+        self.gap = nn.AdaptiveAvgPool1d(1)
+    def _make_layer(self,block,in_channels,out_channels,blocks,stride):
+        layers = []
+        layers.append(block(in_channels,out_channels,stride=stride))
+        for _ in range(1,blocks):
+            layers.append(block(out_channels,out_channels,stride=1))
+        return nn.Sequential(*layers)
+    def forward(self,x):
+        B = x.size(0)
+        x = x.view(B,1,-1)
+        x = self.conv1(x)
+        x = self.stage1(x)
+        x = self.stage2(x)
+        x = self.stage3(x)
+        x = self.stage4(x)
+        x = self.stage5(x)
+        x = self.stage6(x)
+        x = self.stage7(x)
+        x = self.gap(x)
+        return x
 # --- 测试代码 ---
 if __name__ == "__main__":
     # 模拟一个 Batch=16, Channels=64, 序列长度 W=1024 的一维射频信号输入
-    dummy_input = torch.randn(16, 64, 1024) 
+    dummy_input = torch.randn(16, 4800, 2) 
     
     # 实例化模型
-    model = RSBU_CS(in_channels=64, out_channels=64)
+    model = Encoder()
     
     # 前向传播
     output = model(dummy_input)
