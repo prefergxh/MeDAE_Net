@@ -68,6 +68,7 @@ class RSBU_CS(nn.Module):
         return out
     
 
+#编码器
 class Encoder(nn.Module):
     def __init__(self):
         super(Encoder,self).__init__()
@@ -103,17 +104,73 @@ class Encoder(nn.Module):
         x = self.stage7(x)
         x = self.gap(x)
         return x
+
+#分类器    
+class Classifier(nn.Module):
+    def __init__(self,in_features=1024,num_class=9):
+        super(Classifier,self).__init__()
+        self.fc = nn.Linear(1024,9)
+    def forward(self,x):
+        x = torch.flatten(x,start_dim=1)
+        class_res = self.fc(x)
+        return class_res
+    
+#解码器
+class Decoder(nn.Module):
+    def __init__(self,in_channels=1024):
+        super(Decoder,self).__init__()
+        self.fc = nn.Linear(1024,2688)
+        self.stage1 = self.convTranspose(64,64,8,3,3,0)
+        self.stage2 = self.convTranspose(64,64,22,2,0,0)
+        self.stage3 = self.convTranspose(64,64,10,2,0,0)
+        self.stage4 = self.convTranspose(64,64,10,2,0,0)
+        self.stage5 = self.convTranspose(64,64,4,4,0,0)
+        self.stage6 = self.convTranspose(64,64,10,2,0,0)
+        self.conv_block = nn.Sequential(
+            nn.Conv2d(64,1,kernel_size=(9,1),stride=(1,1),padding=(0,0)),
+            nn.Sigmoid()
+        )
+
+    def convTranspose(self,in_channels,out_channels,kernel_size,stride,padding,output_padding):
+        return nn.Sequential(
+            nn.ConvTranspose2d(in_channels,out_channels,kernel_size=(kernel_size,1),stride=(stride,1),padding=(padding,0),output_padding=(output_padding,0)),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+    def forward(self,x):
+        x = torch.flatten(x,start_dim=1)
+        x = self.fc(x)
+        B = x.size(0)
+        x = x.view(B,64,21,2)
+        x = self.stage1(x)
+        x = self.stage2(x)
+        x = self.stage3(x)
+        x = self.stage4(x)
+        x = self.stage5(x)
+        x = self.stage6(x)
+        res = self.conv_block(x)
+        return res
+class MEDAE_Net(nn.Module):
+    def __init__(self,num_classes):
+        super(MEDAE_Net,self).__init__()
+        self.encoder = Encoder()
+        self.classifier = Classifier(num_class=num_classes)
+        self.decoder = Decoder()
+
+    def forward(self,x):
+        features = self.encoder(x)
+        reconstructed_x = self.decoder(features)
+        reconstructed_x = reconstructed_x.squeeze(1)
+        closed_res = self.classifier(features)
+
+        return features,reconstructed_x,closed_res
 # --- 测试代码 ---
 if __name__ == "__main__":
-    # 模拟一个 Batch=16, Channels=64, 序列长度 W=1024 的一维射频信号输入
     dummy_input = torch.randn(16, 4800, 2) 
-    
-    # 实例化模型
-    model = Encoder()
-    
-    # 前向传播
-    output = model(dummy_input)
-    
+    model = MEDAE_Net(9)
+    features,reconstructed_x,closed_res = model(dummy_input)
     print(f"输入形状: {dummy_input.shape}")
-    print(f"输出形状: {output.shape}")
+    print(f"特征形状: {features.shape}")
+    print(f"上采样形状: {reconstructed_x.shape}")
+    print(f"分类形状: {closed_res.shape}")
     
