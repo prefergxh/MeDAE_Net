@@ -6,36 +6,46 @@ import os
 from torch.utils.data import DataLoader
 
 class SirstDataset(Dataset):
-    def __init__(self,signal_dir,device='cpu'):
+    def __init__(self,signal_dir,*tags):
         super().__init__()
+        self.flag = 0
         data_dict = mat73.loadmat(signal_dir)
-        I = data_dict['dataset_I'].astype(np.float32)
-        Q = data_dict['dataset_Q'].astype(np.float32)
-        labels = data_dict['labels'].astype(np.int64)
-        data_np = np.stack([I,Q],axis=1)
-
-        self.data = torch.from_numpy(data_np).to(device)
-        self.labels = torch.from_numpy(labels).to(device)
-    
+        self.datas = torch.tensor(data_dict[tags[0]],dtype=torch.float32)
+        self.labels = torch.tensor(data_dict[tags[1]],dtype=torch.int64)
+        if len(tags)==3:
+            self.flag = 1
+            self.unknown_labels = torch.tensor(data_dict[tags[2]],dtype=torch.int64)
     def __len__(self):
         return len(self.labels)
     
     def __getitem__(self, index):
-        signal = self.data[index]
+        signal = self.datas[index]
         label = self.labels[index]
+        if self.flag:        
+            unknown_label = self.unknown_labels[index]
+            return signal,label,unknown_label
+        return signal,label
 
-        # 执行归一化操作
-        max_val = torch.max(torch.abs(signal))
-        eps = 1e-8
-        normalized_signal = signal / (max_val+eps)
-        return normalized_signal,label
     
 if __name__ == "__main__":
+    # 训练集测试代码
+    # root_path = os.path.abspath('.')
+    # TRAIN_IMG_DIR = root_path + "/dataset/train/radar_sei_dataset.mat"
+    # dataset = SirstDataset(TRAIN_IMG_DIR,'X_shuffled','Y_shuffled')
+    # loader = DataLoader(dataset, batch_size=4, shuffle=True)
+    # for input,target in loader:
+    #     print(input.shape)
+    #     print(target)
+    #     break
+
+
+    # 测试集测试代码
     root_path = os.path.abspath('.')
-    TRAIN_IMG_DIR = root_path + "/dataset/train/radar_sei_iq_data.mat"
-    dataset = SirstDataset(TRAIN_IMG_DIR)
+    TRAIN_IMG_DIR = root_path + "/dataset/test/radar_sei_testset.mat"
+    dataset = SirstDataset(TRAIN_IMG_DIR,'X_test_shuffled', 'Y_test_shuffled', 'Y_is_known_shuffled')
     loader = DataLoader(dataset, batch_size=4, shuffle=True)
-    for input,target in loader:
+    for input,targets,unknowlabels in loader:
         print(input.shape)
-        print(target.device)
+        print(targets)
+        print(unknowlabels)
         break
