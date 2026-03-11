@@ -20,11 +20,17 @@ class SirstDataset(Dataset):
     
     def __getitem__(self, index):
         signal = self.datas[index]
+        I_signal = signal[:,0]
+        Q_signal = signal[:,1]
+        magnitude = torch.sqrt(I_signal**2 + Q_signal**2)
+        max_mag = torch.max(magnitude)
+        max_mag = torch.clamp(max_mag,min=1e-8)
+        signal_normalized = signal / max_mag
         label = self.labels[index]
         if self.flag:        
             unknown_label = self.unknown_labels[index]
-            return signal,label,unknown_label
-        return signal,label
+            return signal_normalized,label,unknown_label
+        return signal_normalized,label
 
     
 if __name__ == "__main__":
