@@ -11,8 +11,10 @@ from components.metric import AccuracyMetric
 from components.metric import AccuracyMetric_Openset
 from components.loss_fn import CenterLoss
 from components.utilsall import save_checkpoint
+from components.utilsall import load_checkpoint
 from components.drawing import draw_academic_curves
 from components.noise_fn import add_online_awgn
+from components.init_weight import init_weights
 from sklearn.metrics import roc_auc_score,roc_curve
 from datetime import datetime
 
@@ -26,7 +28,7 @@ NUM_EPOCHS = 150
 NUM_WORKERS = 4
 root_path = os.path.abspath('.')
 TRAIN_SIGNAL_DIR = root_path + "/dataset/train/radar_sei_dataset.mat"
-TEST_SIGNAL_DIR = root_path + "/dataset/test/radar_sei_iq_data_test.mat"
+TEST_SIGNAL_DIR = root_path + "/dataset/test/radar_sei_testset.mat"
 
 # 日志文件的创建工具函数
 def make_dir(path):
@@ -35,7 +37,7 @@ def make_dir(path):
 
 def main():
     def train_fn(loader,model,optimizer_normal,optimizer_M,loss_CE,loss_MSE,loss_M,scaler,epoch,device=DEVICE,
-                 lambda_ce=1.0,lambda_mse=0.5,lambda_m=0.005):
+                 lambda_ce=1.0,lambda_mse=0.0,lambda_m=0.0):
         model.train()
         loss_M.train()
         loop = tqdm(loader)
@@ -46,11 +48,8 @@ def main():
             data = data.to(device)
             targets = targets.to(device)
             # 添加噪声影响
-            snr_db = torch.empty(1).uniform_(0,20).item()
+            snr_db = torch.empty(1).uniform_(25,30).item()
             noise_signal = add_online_awgn(data,snr_db)
-            # 梯度清零
-            optimizer_normal.zero_grad()
-            optimizer_M.zero_grad()
             # 前向和求损
             with torch.cuda.amp.autocast():
                 features,new_signal,predictions = model(noise_signal)
@@ -60,9 +59,16 @@ def main():
                 loss_total = (lambda_ce*loss_ce) + (lambda_mse*loss_mse) + (lambda_m*loss_m)
             acc_metric.update(predictions,targets)
             acc = acc_metric.compute()
+            train_losses.append(loss_total.item())
+            # 梯度清零
+            optimizer_normal.zero_grad()
+            optimizer_M.zero_grad()
             #反向传播
             scaler.scale(loss_total).backward()
-            train_losses.append(loss_total.item())
+            scaler.unscale_(optimizer_normal)
+            scaler.unscale_(optimizer_M)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(loss_M.parameters(), max_norm=1.0)
             # 优化
             scaler.step(optimizer_normal)
             scaler.step(optimizer_M)
@@ -100,7 +106,7 @@ def main():
                 all_min_distances.extend(min_dist_batch.cpu().numpy())
                 all_is_known_labels.extend(is_known.cpu().numpy())
                 openset_acc_metric.update(pred_class_idx,targets)
-                Acc_Known,Acc_Rogue,Acc_OpenSet = acc_metric.compute()
+                Acc_Known,Acc_Rogue,Acc_OpenSet = openset_acc_metric.compute()
                 loop.set_description(f"test epoch is:{epoch+1}")
                 loop.set_postfix(
                     Known=f"{Acc_Known * 100:.2f}%", 
@@ -111,13 +117,15 @@ def main():
         all_is_known_labels = np.array(all_is_known_labels)
         scores = -all_min_distances
         auroc = roc_auc_score(all_is_known_labels,scores)
-        return acc_metric.compute(),auroc
+        Acc_Known,Acc_Rogue,Acc_OpenSet = openset_acc_metric.compute()
+        return Acc_Known,Acc_Rogue,Acc_OpenSet,auroc
         
 
     #配置
-    lr_normal = 0.001
+    lr_normal = 0.0001
     lr_M = 0.01
     model = MEDAE_Net(2).to(DEVICE)
+    model.apply(init_weights)
     loss_CE = nn.CrossEntropyLoss()
     lose_MSE = nn.MSELoss()
     loss_M = CenterLoss(num_classes=6,feat_dim=1024).to(DEVICE)
@@ -145,6 +153,17 @@ def main():
     num_auroc = []
     num_train_acc = []
 
+    #训练中断恢复
+    checkpoint_file = "my_checkpoint.pth.tar"
+    start_epoch,best_Acc_OpenSet = load_checkpoint(
+        checkpoint_path=checkpoint_file,
+        model=model,
+        center_loss_module=loss_M,
+        optimizer_model=optimizer_normal,
+        optimizer_center=optimizer_M,
+        device=DEVICE
+    )
+
     #输出
     make_dir('./work_dirs')
     save_model_file_path = os.path.join(root_path,'work_dirs',MODEL_NAME)
@@ -159,12 +178,12 @@ def main():
 
 
     #开始训练
-    for epoch in range(NUM_EPOCHS):
+    for epoch in range(start_epoch,NUM_EPOCHS):
         # 每一轮训练
         train_acc,train_loss = train_fn(train_loader,model,optimizer_normal,optimizer_M,loss_CE,lose_MSE,loss_M,scaler,epoch,
                                         device=DEVICE,lambda_ce=1.0,lambda_mse=0.5,lambda_m=0.005)
         # 训练完测试检测，当模型有过拟合倾向时及时停止
-        Acc_Known,Acc_Rogue,Acc_OpenSet,auroc = val_fn(val_loader,model,loss_M,epoch,feat_dim=1024,device=DEVICE,lambda_open=1.0)
+        Acc_Known,Acc_Rogue,Acc_OpenSet,auroc = val_fn(val_loader,model,loss_M,epoch,feat_dim=1024,device=DEVICE,lambda_open=0.05)
         # 保存中断时模型的所有参数，防止中断而导致要从头重新训练
         checkpoint = {
             # 1. 进度追踪 (用于恢复训练时知道从哪开始)

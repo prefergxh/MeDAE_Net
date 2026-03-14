@@ -31,6 +31,8 @@ class AccuracyMetric_Openset:
         self.num_is_known = 0
         self.num_rougue = 0
     def update(self,pred_class_idx,targets):
+        if isinstance(pred_class_idx, torch.Tensor):
+            pred_class_idx = pred_class_idx.cpu()
         targets_copy = targets.clone() if isinstance(targets, torch.Tensor) else targets.copy()
         targets_copy[targets_copy>=self.num_known] = self.reject_label
         mask = (targets_copy == pred_class_idx)

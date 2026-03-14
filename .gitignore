@@ -1,2 +1,4 @@
 *.pyc
 *.mat
+*.tar
+work_dirs/

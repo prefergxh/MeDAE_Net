@@ -52,7 +52,6 @@ def draw_academic_curves(epochs, acc_data_dict, save_path,label="Accuracy (%)"):
 
     # 6. 🌟 终极保存：去除四周多余白边 (bbox_inches='tight')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.show()
     print(f"✅ 高清图表已成功保存至: {save_path}")
 
 

@@ -103,7 +103,8 @@ class Encoder(nn.Module):
         x = self.stage6(x)
         x = self.stage7(x)
         x = self.gap(x)
-        return x
+        features = x.squeeze(-1)
+        return features
 
 #分类器    
 class Classifier(nn.Module):
@@ -111,7 +112,6 @@ class Classifier(nn.Module):
         super(Classifier,self).__init__()
         self.fc = nn.Linear(1024,9)
     def forward(self,x):
-        x = torch.flatten(x,start_dim=1)
         class_res = self.fc(x)
         return class_res
     
@@ -138,7 +138,6 @@ class Decoder(nn.Module):
             nn.ReLU(inplace=True)
         )
     def forward(self,x):
-        x = torch.flatten(x,start_dim=1)
         x = self.fc(x)
         B = x.size(0)
         x = x.view(B,64,21,2)
